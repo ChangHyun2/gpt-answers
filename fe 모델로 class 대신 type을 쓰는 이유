@@ -186,7 +186,7 @@ UI 친화성	✅ 높음	❌ 낮음
 FE model은 “객체”가 아니라 “데이터 스냅샷”이다.
 그래서 클래스가 아니라 타입이 가장 잘 맞는다.
 
-
+fe domain model class vs type
 
 1) 가장 큰 차이: TypeScript의 “type”은 런타임에 없다
 
