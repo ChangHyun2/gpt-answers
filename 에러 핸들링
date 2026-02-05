@@ -309,3 +309,399 @@ Sentry에서도 거의 필수 패턴
 
 
 로딩 중 스켈레톤/문구
+
+아래는 React + React Query + SPA(번들) + 브라우저 환경 기준으로 “종류별 세분화” 목록이야. (각 항목마다 대표 증상 / 잡는 방법도 같이 적었어.)
+
+1) 렌더링/리액트 런타임 계열
+1-1. Render 에러 (render phase)
+
+예: Cannot read properties of undefined, 잘못된 JSX, 타입 가정 깨짐
+
+증상: 흰 화면, 특정 컴포넌트만 깨짐
+
+캡처: ✅ ErrorBoundary 가능
+
+1-2. Lifecycle 에러 (class lifecycle)
+
+예: componentDidMount에서 throw
+
+캡처: ✅ ErrorBoundary 가능
+
+1-3. Hook 규칙 위반 / invalid hook call
+
+예: 조건문 안에서 hook 호출, 중복 React 버전, 잘못된 번들링
+
+증상: 앱 즉시 터짐, 콘솔에 “Invalid hook call…”
+
+캡처: 보통 ❌ (앱 부팅 자체가 깨질 수 있음)
+
+1-4. 무한 렌더 / 너무 많은 re-render
+
+예: render 중 setState, effect 의존성 실수
+
+증상: “Too many re-renders”, 브라우저 멈춤
+
+캡처: 일부는 ✅ ErrorBoundary(throw인 경우), 하지만 멈춤은 ❌
+
+1-5. Suspense/런타임 경계 문제
+
+예: Suspense boundary 없음, lazy 로딩 구성 실수
+
+증상: 화면이 영원히 로딩, fallback만 뜸
+
+캡처: 부분적으로 ✅ (설정/구성 문제는 별도)
+
+2) 이벤트/핸들러(사용자 액션) 계열
+2-1. 이벤트 핸들러 throw
+
+예: onClick에서 throw
+
+캡처: ❌ ErrorBoundary(기본적으로 못 잡음)
+
+대응: 핸들러 내부 try/catch, 로깅
+
+2-2. 폼 처리/검증 에러
+
+예: schema validation 실패, 입력값 변환 실패
+
+대응: 컴포넌트 단위 처리(필드 에러), 공통 메시지 매핑
+
+2-3. Mutation 실패
+
+예: 저장/삭제/업로드 실패
+
+대응: React Query useMutation의 onError + mutateAsync try/catch
+
+3) Effect/비동기 실행 컨텍스트 계열
+3-1. useEffect 내부 동기 throw
+
+예: effect 안에서 바로 throw
+
+캡처: 보통 ❌ ErrorBoundary (케이스/버전에 따라 다르게 보일 수 있어도 믿지 않는 게 안전)
+
+대응: effect 내부 try/catch, 에러 상태/로깅
+
+3-2. Promise rejection (async 에러)
+
+예: await 중 실패, .then() 체인에서 throw
+
+증상: 콘솔에 “Unhandled promise rejection”
+
+캡처: ❌ ErrorBoundary
+
+대응: try/catch + 전역 unhandledrejection 리스너(관측용)
+
+3-3. 타이머/콜백 에러
+
+예: setTimeout, requestAnimationFrame, event listener 콜백
+
+캡처: ❌ ErrorBoundary
+
+대응: 콜백 내부 try/catch + cleanup
+
+4) 데이터 패칭/네트워크 계열 (React Query 포함)
+4-1. 네트워크 레벨 실패
+
+예: DNS 실패, 연결 실패, CORS 차단, 오프라인
+
+증상: fetch는 보통 TypeError: Failed to fetch
+
+대응: React Query onError / retry 정책 / 오프라인 UX
+
+4-2. HTTP 에러 응답 (4xx/5xx)
+
+예: 404, 409, 422, 500
+
+특징: fetch는 throw 안 함(직접 throw 해야 함)
+
+대응: API 클라이언트에서 표준화(에러 객체 통일)
+
+4-3. 인증/인가 에러
+
+예: 401(토큰 만료), 403(권한 없음)
+
+대응: 중앙 집중 처리(로그아웃/리프레시), 화면은 개별 처리
+
+4-4. 타임아웃
+
+예: 서버 지연, 네트워크 불안
+
+대응: AbortController / axios timeout / React Query retry+backoff
+
+4-5. 서버 데이터 스키마 불일치
+
+예: 응답이 예상 타입과 다름, 필드 누락
+
+대응: 런타임 validation(zod 등)로 “데이터 에러”로 승격
+
+4-6. 캐시/동시성 관련 에러
+
+예: stale 데이터, optimistic update 롤백 실패, race condition
+
+대응: mutation lifecycle(onMutate/onError/onSettled) 정교화
+
+5) 라우팅/네비게이션 계열
+5-1. 라우트 로더/데이터 로딩 실패
+
+(라우터에 따라) loader/action에서 throw
+
+대응: 라우터 제공 errorElement / route boundary
+
+5-2. 잘못된 경로/파라미터
+
+예: id가 숫자여야 하는데 문자열
+
+대응: 파라미터 파싱/검증 후 404/리다이렉트
+
+6) 번들/리소스 로딩(배포/캐시) 계열 — “흰 화면” 진짜 범인
+6-1. Chunk 로딩 실패
+
+예: Loading chunk N failed
+
+원인: 배포 직후 캐시 꼬임, CDN/서비스워커
+
+캡처: React 이전 단계라 ErrorBoundary ❌
+
+대응: window.onerror에서 감지 후 reload 안내/자동 새로고침
+
+6-2. 정적 리소스 로딩 실패
+
+CSS/폰트/이미지 깨짐
+
+증상: UI 깨짐, 글꼴 fallback
+
+대응: CDN/캐시 정책, 모니터링
+
+6-3. 서비스워커/캐시 충돌
+
+오래된 JS/CSS가 남아 서로 버전 불일치
+
+대응: SW 업데이트 전략, “새 버전 감지 시 새로고침”
+
+7) 상태관리/데이터 흐름 계열 (Redux/Zustand/Context 포함)
+7-1. 상태 불변성/참조 문제
+
+예: mutate로 인해 렌더가 안 바뀜, memo가 꼬임
+
+대응: 불변 업데이트, selector 설계
+
+7-2. hydration/초기 상태 불일치(SSR/Next.js일 때)
+
+예: “Text content does not match server-rendered HTML”
+
+대응: 클라이언트 전용 코드 분리, useEffect로 이동
+
+8) 브라우저/플랫폼/권한 계열
+8-1. Storage/Quota 에러
+
+localStorage 꽉 참, IndexedDB 실패
+
+대응: try/catch + graceful degradation
+
+8-2. 권한 거부
+
+카메라/마이크/위치/알림 권한
+
+대응: 사용자 안내 + 설정 유도
+
+8-3. Web API 지원 안 함
+
+구형 브라우저에서 특정 API 미지원
+
+대응: feature detection + 폴리필/대체 UX
+
+9) 서드파티 SDK/외부 스크립트 계열
+9-1. analytics/ads/chat 위젯 스크립트 오류
+
+외부 JS가 throw → 앱에도 영향 줄 수 있음
+
+대응: 격리 로딩, 실패해도 앱은 살아남게
+
+9-2. SDK 초기화 실패
+
+키 만료/네트워크/차단
+
+대응: 초기화 try/catch + fallback
+
+10) 개발/빌드/환경 설정 계열 (런타임에 터지기도 함)
+10-1. env 누락/잘못된 설정
+
+예: API_BASE_URL undefined
+
+대응: 부팅 시 검증(필수 env 체크)
+
+10-2. 소스맵/배포 설정 문제
+
+에러 추적이 불가능해짐(디버깅 난이도 폭증)
+
+대응: sourcemap 업로드/보안 정책
+
+“캡처 가능성”으로 다시 한 번 요약 (실전 체크리스트)
+
+✅ ErrorBoundary로 잡는 것
+
+Render/Lifecycle(클래스), 일부 리액트 런타임 에러
+
+❌ ErrorBoundary로 못 잡는 것 (따로 잡아야 함)
+
+이벤트 핸들러, useEffect/async, timer/callback
+
+chunk 로딩 실패(React 실행 전)
+
+서비스워커/캐시 꼬임
+
+✅ React Query가 잡는 것
+
+query/mutation 비동기 에러(네트워크/HTTP/스키마)
+
+✅ 전역(window)에서 관측하는 것
+
+error, unhandledrejection (주로 로깅/리포팅용)
+
+
+
+Core principles (so the table actually works at scale)
+
+Centralize:
+
+error classification (classifyError)
+
+logging/reporting (reportError)
+
+auth/session handling (401/refresh/logout)
+
+global fallbacks (ErrorBoundary, chunk-load recovery)
+
+Localize (per component/page):
+
+user-facing copy
+
+recovery UI (retry button, partial fallback)
+
+business exceptions (409/422 etc.)
+
+Avoid toast storms: global handlers shouldn’t spam toasts. Use toasts mostly at the interaction point (button/form).
+
+Error Policy Table (All major cases)
+
+Legend
+Catch layer: where you handle it first (and where you can reliably handle it)
+User UX: what the user sees
+Retry: automatic retry behavior
+Log/Alert: what you send to observability + whether you page someone
+Severity: P0 (site down) → P3 (minor)
+
+A) App boot / Asset / Deployment errors (common “white screen” causes)
+Category	Typical signals	Catch layer	User UX	Retry	Log/Alert	Severity	Owner
+Chunk load failed (new deploy + old cache)	Loading chunk X failed, ChunkLoadError	window.onerror + app-level bootstrap guard	“New version available. Refresh” + auto-reload (once)	Auto reload once, then show “hard refresh” instructions	Log with build/version + URL; alert if spike	P0/P1	Frontend + Platform
+JS parse error / syntax	Unexpected token, CSP blocks	window.onerror (React may not start)	Static fallback in index.html (“We’re having trouble loading…”)	No retry (maybe reload once)	Immediate alert; track by browser/region	P0	Frontend + Platform
+CSS/asset 404	missing CSS/font	RUM metrics + Network logs	App loads but looks broken → show banner “Display issue, refresh”	Optional refresh prompt	Alert if >X% sessions affected	P1/P2	Frontend
+Service Worker cache mismatch	repeated chunk errors, offline weirdness	SW update handler + window.onerror	“Update required” modal → reload & clear SW	Auto update + reload	Alert if sustained	P1	Platform
+
+Policy note: for 10M users, chunk-load recovery is mandatory.
+
+B) Rendering / React runtime errors (ErrorBoundary territory)
+Category	Typical signals	Catch layer	User UX	Retry	Log/Alert	Severity	Owner
+Render error (undefined access, bad JSX)	Cannot read properties of undefined	Route/page ErrorBoundary first, then global	Page fallback with “Try again” + “Go home”	“Reset boundary” / refetch	Log with component stack; alert if spike on new release	P1/P2	Frontend
+Widget-level render error	isolated component breaks	Component boundary	Replace widget with “Couldn’t load section” + retry	local reset	Log; no paging unless high	P2/P3	Frontend
+Infinite re-render / freeze	“Too many re-renders”, CPU 100%	Dev prevention + runtime watchdog (RUM)	Often appears as hang; show “Reload” if detected	reload suggestion	Alert via RUM hang metrics	P1	Frontend
+Invalid hook call	duplicate React, rules violation	Build pipeline + runtime crash	Static fallback; reload won’t help	none	Immediate alert	P0	Frontend + Build
+C) React Query: Queries (read) & Mutations (write)
+Queries (useQuery)
+Category	Typical signals	Catch layer	User UX	Retry	Log/Alert	Severity	Owner
+Network down / DNS / CORS-like	fetch TypeError: Failed to fetch	Query onError + UI state	Inline “You seem offline” + retry button	React Query retry with backoff (limited)	Log type=network + navigator.onLine; alert if huge	P1/P2	Frontend + Platform
+Timeout	AbortError/timeout wrapper	Query onError	“Request timed out” + retry	retry (2–3)	Log latency + endpoint; alert if sustained	P1	Backend + Platform
+5xx server error	status 500–599	Query onError	“We’re having trouble. Try again.”	retry (safe reads)	Alert on error rate threshold	P0/P1	Backend
+404 not found (read)	404	Component/page	Show “Not found” page	no	Log as info unless unexpected	P2	Product + Backend
+401 unauthorized	401	Central auth handler	silent refresh; if fail → login screen	retry after refresh once	Alert if refresh failing broadly	P0/P1	Platform/Auth
+403 forbidden	403	Component/page	“No access” + request access	no	Log security context	P2	Product/Auth
+Schema mismatch / bad data	Zod parse fail, unexpected shape	queryFn validation	“Data issue” (safe fallback)	no (unless transient)	Log with payload sample (redacted); alert if spike	P1	Backend + Frontend
+Mutations (useMutation)
+Category	Typical signals	Catch layer	User UX	Retry	Log/Alert	Severity	Owner
+Validation error	400/422 field errors	Mutation onError	Field-level errors + guidance	no	Log as info	P3	Product + Backend
+Conflict	409	Mutation onError	“Changed elsewhere. Refresh data.” + “Reload”	no	Log conflict rate	P2	Backend
+Rate limit	429	Mutation onError	“Too many requests. Wait a bit.”	retry after delay (optional)	Alert if many users hit 429	P1/P2	Backend
+5xx on write	5xx	Mutation onError	“Save failed. Try again.” + keep draft	cautious retry (idempotent only)	Alert	P0/P1	Backend
+Optimistic update rollback fail	cache inconsistency	mutation lifecycle	show “We’ll resync” + refetch	refetch	Log with query keys	P2	Frontend
+D) Event handlers / Effects / Async code (outside ErrorBoundary)
+Category	Typical signals	Catch layer	User UX	Retry	Log/Alert	Severity	Owner
+Handler error (onClick/onSubmit)	thrown in handler	try/catch in handler	toast/dialog + keep user input	user-driven retry	Log (include action name)	P2/P3	Frontend
+Unhandled promise rejection	unhandledrejection	global listener (logging) + local try/catch	usually none; maybe banner if critical	no	Log always; alert if spike	P1/P2	Frontend
+useEffect async failure	rejected promise	local try/catch	optional: silent or show inline	depends	Log; alert if widespread	P2	Frontend
+E) Routing / Navigation / SSR (if applicable)
+Category	Typical signals	Catch layer	User UX	Retry	Log/Alert	Severity	Owner
+Route param invalid	parse fail	route guard	404 or redirect	no	Log low	P3	Frontend
+Loader/action error (router data APIs)	thrown in loader	router errorElement / boundary	page fallback	retry	Log	P1/P2	Frontend
+F) Browser/platform permissions & storage
+Category	Typical signals	Catch layer	User UX	Retry	Log/Alert	Severity	Owner
+localStorage/IndexedDB quota	QuotaExceededError	storage wrapper	“Storage full” + guidance	no	Log device/browser	P2	Frontend
+Permission denied (camera/location)	NotAllowedError	feature wrapper	explain + “Open settings”	user action	Log permission states	P3	Frontend
+Unsupported browser/API	feature detection fail	bootstrap guard	“Please update browser”	no	Log browser versions	P2	Frontend
+G) Third-party SDKs/scripts
+Category	Typical signals	Catch layer	User UX	Retry	Log/Alert	Severity	Owner
+Analytics/chat widget crash	script error	isolate + try/catch + boundary	app should continue; widget disabled	optional reload widget	Log only	P3	Frontend
+Payment/auth SDK failure	init fail, blocked	wrapper + fallback flow	show “Try again / alternate method”	limited retry	Alert if payment affected	P0/P1	Product + Platform
+Standard actions (apply consistently)
+1) What every error log must include (10M-user hygiene)
+
+error_id (uuid)
+
+category (from classifier)
+
+severity
+
+release_version / build_id
+
+route, component (if available)
+
+user_action (if handler/mutation)
+
+endpoint, status, trace_id (backend correlation)
+
+redacted request/response snippets (never raw PII)
+
+2) Alert thresholds (example)
+
+P0: checkout/login unavailable, chunk-load spikes, JS fatal spikes
+
+P1: 5xx rate > X% for Y minutes, render errors after new release
+
+P2: localized feature breakage
+
+P3: expected validation/user errors
+
+3) UX message policy
+
+Network/offline: “Check connection” + retry
+
+401: silent refresh → if fail, “Session expired, please sign in”
+
+403: “No permission”
+
+404: “Not found”
+
+5xx: “We’re having trouble” + retry
+
+Validation: inline field errors (no generic toast)
+
+Recommended default “catch mapping” (so you don’t miss anything)
+
+Global
+
+Global ErrorBoundary (last resort UI)
+
+window.onerror + window.unhandledrejection (logging + chunk-load recovery)
+
+Route-level
+
+Page ErrorBoundary (best UX)
+
+React Query
+
+QueryClient onError → logging + auth handling
+
+Component onError → user message & recovery UI
+
+Handlers/effects
+
+local try/catch with reportError({action/effectName})
