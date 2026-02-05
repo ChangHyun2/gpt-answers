@@ -483,3 +483,261 @@ IndexedDB 캐시 → POJO 직렬화 구조
 이렇게 나누면
 웹/모바일 간 사고방식도 거의 동일해지고,
 AI 도구가 코드 생성하기도 훨씬 쉬워져.
+
+“웹에서 domain logic(비즈니스 규칙/판단/계산)을 어디에 두는 게 제일 좋은가”를 네가 짠 모듈 구조 기준으로 깔끔하게 이어갈게.
+
+핵심 결론
+
+웹(React/React Query)에서 domain logic은 보통 모델(데이터) 안(클래스) 이 아니라,
+순수 함수(도메인 규칙 모음) 로 두는 게 가장 관리가 쉽고 재사용이 잘 돼.
+
+즉:
+
+Model = 데이터 스냅샷(type)
+
+Domain Logic = pure functions / selectors / policies
+
+Side effects(IO) = usecase/service/mutation
+
+도메인 로직을 3종류로 나눠서 배치하면 안 헷갈림
+1) “순수 계산/판단” 로직 (추천: domain functions)
+
+예:
+
+canEditBook(book, user)
+
+getBookDisplayTitle(book)
+
+isBookExpired(book)
+
+calcDiscountedPrice(book, coupon)
+
+✅ 특징: 입력 → 출력, 부작용 없음
+✅ 위치(추천):
+
+modules/book/domain/ 또는 modules/book/functions/domain/
+
+shared로 가도 되는 건 shared/functions
+
+예시 구조:
+
+modules/book/
+  model/
+    book.model.ts
+  domain/
+    book.policy.ts     // canEditBook, canBorrowBook ...
+    book.presenter.ts  // getBookDisplayTitle, formatters(도메인용)
+    book.calculator.ts // price 계산 등
+
+
+이름 팁: policy / calculator / presenter처럼 역할이 드러나게 나누면 AI도 잘 맞춰 생성함.
+
+2) “파생 데이터(derived)” 로직 (추천: selectors)
+
+예:
+
+selectBookCardViewModel(book, user)
+
+selectSearchResultView(result)
+
+selectBooksGroupedByCategory(books)
+
+✅ 특징: UI에 필요한 형태로 변환/정렬/그룹핑
+✅ 위치:
+
+modules/book/selectors/
+또는 관심사 폴더 옆(search/, detail/)에 co-locate
+
+예:
+
+modules/book/search/
+  search.selectors.ts
+  useBookSearchQuery.ts
+
+
+파생 로직은 “도메인 규칙”이라기보다 “뷰 준비”라서 domain 폴더랑 분리하면 깔끔해.
+
+3) “IO 포함” 로직 (추천: usecase/service)
+
+예:
+
+“책 대여하기” = 권한 확인 + API 호출 + 캐시 업데이트 + 토스트
+
+“책 좋아요” = optimistic update + 실패 롤백
+
+✅ 특징: 외부 세계와 상호작용, 부작용 있음
+✅ 위치:
+
+modules/book/application/ 또는 modules/book/services/
+
+혹은 mutations/에서 충분히 처리 가능
+
+예:
+
+modules/book/
+  application/
+    borrowBook.usecase.ts
+  hooks/mutations/
+    useBorrowBookMutation.ts
+
+React Query랑 결합하면 “정석 흐름”이 이렇게 됨
+✅ Query(읽기)
+
+api에서 DTO 가져옴(+zod)
+
+mapper로 FE 모델 생성 (캐시에 저장)
+
+select로 파생 제공(훅 내부에서)
+
+✅ Mutation(쓰기)
+
+domain policy로 “가능 여부” 판단(순수)
+
+mutation으로 서버 호출(IO)
+
+성공/실패 시 캐시 업데이트 + UI 피드백
+
+“모델 안에 메서드로 넣으면 안 되냐?”
+
+넣을 수는 있어. 근데 React + 캐시 기반에서는 단점이 더 커지기 쉬워:
+
+캐시 교체 시 인스턴스/메서드 유지 이슈
+
+직렬화/복원/테스트 어려움
+
+모델이 커지면 어디까지 모델 책임인지 경계가 흐려짐
+
+그래서 보통은:
+
+“도메인 규칙은 함수로, 데이터를 넣은 객체는 plain으로”
+
+이 조합이 가장 덜 아픔.
+
+마지막 한 방: “도메인 로직이 어디까지냐?” 기준
+
+여러 화면/유스케이스에서 공통으로 쓰이고
+
+UI/프레임워크에 의존하지 않고
+
+서버 호출 없이 판단/계산 가능하면
+
+→ domain/의 순수 함수로 두는 게 정답.
+
+결론부터 말하면
+
+getBookDisplayTitle(book)는 “순수 도메인 로직”이라기보다는
+“도메인 지식을 사용하는 프레젠테이션 로직”에 더 가깝다.
+
+즉, 경계선에 걸쳐 있지만 도메인 코어는 아니다.
+
+왜 canEditBook이랑 성격이 다른가
+1️⃣ 도메인 로직의 기준
+
+보통 “도메인 로직”이라고 부를 수 있으려면:
+
+비즈니스 규칙이다
+
+틀리면 제품이 잘못 동작한다
+
+UI가 없어도 서버/배치/검증에서 그대로 의미가 있다
+
+표현 방식이 아니라 의미 자체를 다룬다
+
+canEditBook(book, user)
+
+권한/정책
+
+틀리면 보안 문제
+
+UI 없어도 의미 있음
+→ 강한 도메인 로직 ✅
+
+isBookExpired(book)
+
+만료 여부는 비즈니스 규칙
+
+결제/대여/노출에 영향
+→ 강한 도메인 로직 ✅
+
+calcDiscountedPrice(book, coupon)
+
+금액 계산 규칙
+
+결제 로직에 영향
+→ 강한 도메인 로직 ✅
+
+그럼 getBookDisplayTitle(book)는?
+이 함수의 특징을 보자
+
+UI에서 어떻게 보일지를 결정
+
+줄바꿈, 괄호, 접두어/접미어 같은 표현 문제
+
+Locale/i18n 영향을 받기 쉬움
+
+제품 정책이 바뀌면 UI 요구로 바뀜
+
+즉:
+
+“책의 본질”이 아니라 “책을 보여주는 방식”에 대한 지식
+
+그래서 이건 보통:
+
+❌ 도메인 코어
+
+✅ 프레젠테이션 로직 (Presenter / ViewModel)
+
+좋은 분류 방법 (실무에서 바로 써먹는 기준)
+질문 1
+
+이 함수가 서버에서도 그대로 쓰일 수 있을까?
+
+canEditBook → 가능
+
+getBookDisplayTitle → 거의 불필요
+
+질문 2
+
+이 규칙이 틀리면 법적/금전적/정책적 문제가 생길까?
+
+calcDiscountedPrice → 예
+
+getBookDisplayTitle → 아니오 (UI 깨짐 정도)
+
+질문 3
+
+다국어/디자인 변경 시 같이 바뀔 가능성이 높은가?
+
+높다 → 도메인 아님
+
+그럼 어디에 두는 게 맞나?
+추천 위치 3가지 중 하나
+1️⃣ presenters/ (가장 명확)
+modules/book/presenters/
+  book.presenter.ts
+
+
+여기에:
+
+getBookDisplayTitle
+
+formatBookAuthor
+
+getBookBadgeText
+
+2️⃣ selectors/ (React 친화적)
+modules/book/selectors/
+  bookCard.selector.ts
+
+
+여기서:
+
+toBookCardViewModel(book)
+
+내부에서 title 가공
+
+실전 네이밍 팁 (AI도 잘 이해함)
+
+도메인: policy, rule, calculator
+
+프레젠테이션: presenter, formatter, selector, viewModel
